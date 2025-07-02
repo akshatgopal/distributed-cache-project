@@ -6,6 +6,8 @@ import lombok.Data;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
+
 import java.util.Map;
 
 @RestController
@@ -24,24 +26,30 @@ public class CacheController {
     }
 
     @GetMapping("/{key}")
-    public ResponseEntity<Object> get(@PathVariable String key){
-        Object value = cacheService.get(key);
-        if(value != null){
-            return new ResponseEntity<>(value, HttpStatus.OK);
-        }
-        return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+    public Mono<ResponseEntity<Object>> get(@PathVariable String key) {
+        return cacheService.get(key) // CacheService now returns Mono<Object>
+                .map(value -> new ResponseEntity<>(value, HttpStatus.OK)) // If value emitted, return OK
+                .defaultIfEmpty(new ResponseEntity<>(HttpStatus.NOT_FOUND)); // If Mono is empty (404/not found), return NOT_FOUND
     }
 
     @PostMapping("/{key}")
-    public ResponseEntity<String> put(@PathVariable String key, @RequestBody CachePutRequest request){
-        cacheService.put(key, request.getValue(), request.getTtlMillis());
-        return new ResponseEntity<>("Key '" + key + "' stored successfully.", HttpStatus.CREATED);
+    public Mono<ResponseEntity<String>> put(@PathVariable String key,
+                                            @RequestBody CachePutRequest request) {
+        return cacheService.put(key, request.getValue(), request.getTtlMillis()) // CacheService now returns Mono<Void>
+                .then(Mono.just(new ResponseEntity<>("Key '" + key + "' stored successfully.", HttpStatus.CREATED)))
+                .onErrorResume(e -> {
+                    // Basic error handling: if something goes wrong during put/forward, return 500
+                    return Mono.just(new ResponseEntity<>("Failed to store key '" + key + "': " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
+                });
     }
 
     @DeleteMapping("/{key}")
-    public ResponseEntity<String> delete(@PathVariable String key) {
-        cacheService.delete(key);
-        return new ResponseEntity<>("Key '" + key + "' deleted.", HttpStatus.NO_CONTENT);
+    public Mono<ResponseEntity<String>> delete(@PathVariable String key) {
+        return cacheService.delete(key) // CacheService now returns Mono<Void>
+                .then(Mono.just(new ResponseEntity<>("Key '" + key + "' deleted.", HttpStatus.NO_CONTENT)))
+                .onErrorResume(e -> {
+                    return Mono.just(new ResponseEntity<>("Failed to delete key '" + key + "': " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
+                });
     }
 
     @Data
