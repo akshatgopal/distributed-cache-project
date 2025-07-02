@@ -33,7 +33,7 @@ public class CacheService {
         if(currentProps == null){
             throw new IllegalStateException("Current node properties (cache.node) are not configured for CacheService.");
         }
-        this.currentNode = new Node(currentProps.getId(), currentProps.getHost(), currentProps.getPort());
+        this.currentNode = new Node(currentProps.getHost() + ":" + currentProps.getPort(), currentProps.getHost(), currentProps.getPort());
         log.info("CacheService initialized. Current node: {}", currentNode);
     }
 
@@ -53,7 +53,8 @@ public class CacheService {
 
     public Mono<Void> put(String key, Object value, long ttlMillis) {
         Node ownerNode = hashRing.getOwnerNode(key);
-
+        log.debug(currentNode.getAddress(),currentNode.getId());
+        log.debug("It enters this area!!");
         if (currentNode.equals(ownerNode)) {
             log.debug("Key '{}' belongs to this node. Storing locally.", key);
             localCache.put(key, value, ttlMillis);

@@ -12,6 +12,7 @@ import java.util.*;
 @Component
 public class HashRing {
     private static final Logger log = LoggerFactory.getLogger(HashRing.class);
+    private static final int VIRTUAL_NODES_PER_REAL_NODE = 100;
     private final TreeMap<Integer,Node> ring = new TreeMap<>();
     private final NodeConfigProperties nodeConfigProperties;
     @Getter
@@ -28,12 +29,12 @@ public class HashRing {
             log.error("Failed to initialize HashRing: Current node properties (cache.node) are not configured.");
             throw new IllegalStateException("Current node properties must be configured in application.properties.");
         }
-        this.currentNode = new Node(currentProps.getId(), currentProps.getHost(), currentProps.getPort());
+        this.currentNode = new Node(currentProps.getHost() + ":" + currentProps.getPort(), currentProps.getHost(), currentProps.getPort());
         log.info("HashRing initializing for current node: {}", currentNode);
         List<String> peers = nodeConfigProperties.getPeers();
         if (peers == null || peers.isEmpty()) {
             log.warn("No peer nodes configured in application.properties (cache.peers). Hash ring will contain only this node.");
-            addNode(this.currentNode); // Add self if no peers are listed
+            addRealNodeToRing(this.currentNode); // Add self if no peers are listed
         }else{
             for(String peerAddress : peers){
                 try {
@@ -46,7 +47,7 @@ public class HashRing {
                         // For simplicity, let's use the address as the ID if not provided explicitly.
                         // In a real system, nodes would announce their unique ID.
                         Node peerNode = new Node(peerAddress, host, port); // Using address as ID for simplicity
-                        addNode(peerNode);
+                        addRealNodeToRing(peerNode);
                         log.info("Added peer node to HashRing: {}", peerNode);
                     } else {
                         log.warn("Invalid peer address format: {}. Expected host:port. Skipping.", peerAddress);
@@ -70,14 +71,17 @@ public class HashRing {
         return h ^ (h >>> 16);
     }
 
-    public void addNode(Node node){
+    public void addRealNodeToRing(Node node){
         if(node == null) {
             log.warn("Attempted to add a null node to the HashRing.");
             return;
         }
-        int nodeHash = hashKey(node.getAddress());
-        ring.put(nodeHash,node);
-        log.debug("Node added to ring : {} at hash {}",node.getId(),nodeHash);
+        for (int i = 0; i < VIRTUAL_NODES_PER_REAL_NODE; i++) {
+            // Hash a combination of the node's address and the virtual node index
+            int virtualNodeHash = hashKey(node.getAddress() + "-" + i);
+            ring.put(virtualNodeHash, node); // Store the REAL node object
+            log.debug("Added virtual node for {} at hash {}", node.getId(), virtualNodeHash);
+        }
     }
 
     public void removeNode(Node node) {
@@ -85,9 +89,17 @@ public class HashRing {
             log.warn("Attempted to remove a null node from the HashRing.");
             return;
         }
-        int nodeHash = hashKey(node.getAddress());
-        ring.remove(nodeHash);
-        log.debug("Node removed from ring: {} at hash {}", node.getId(), nodeHash);
+        List<Integer> hashesToRemove = new ArrayList<>();
+        for (Map.Entry<Integer, Node> entry : ring.entrySet()) {
+            if (entry.getValue().equals(node)) { // Use Node.equals() to find matching real nodes
+                hashesToRemove.add(entry.getKey());
+            }
+        }
+        for (Integer hash : hashesToRemove) {
+            ring.remove(hash);
+            log.debug("Removed virtual node for {} at hash {}", node.getId(), hash);
+        }
+        log.info("Node {} removed from ring ({} virtual nodes removed).", node.getId(), hashesToRemove.size());
     }
 
     public Node getOwnerNode(String key) {
@@ -117,7 +129,7 @@ public class HashRing {
     }
 
     public int getRingSize() {
-        return ring.size();
+        return (int) ring.values().stream().distinct().count(); // Count distinct real nodes
     }
 
 }

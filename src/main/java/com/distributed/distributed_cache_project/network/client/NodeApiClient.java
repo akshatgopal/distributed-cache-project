@@ -42,6 +42,7 @@ public class NodeApiClient {
      */
     public Mono<Void> forwardPut(Node targetNode, String key, Object value, long ttlMillis) {
         String url = String.format("http://%s:%d/internal/cache/%s", targetNode.getHost(), targetNode.getPort(), key);
+        log.info("Url here is -> '{}",url);
         log.info("Forwarding PUT request for key '{}' to node: {}", key, targetNode.getId());
 
         InternalCacheController.InternalCachePutRequest requestBody = new InternalCacheController.InternalCachePutRequest();
