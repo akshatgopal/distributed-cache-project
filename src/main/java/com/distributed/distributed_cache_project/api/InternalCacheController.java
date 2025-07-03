@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/internal/cache")
@@ -18,28 +19,37 @@ public class InternalCacheController {
     }
 
     @GetMapping("/{key}")
-    public ResponseEntity<Object> internalGet(@PathVariable String key) {
+    public Mono<ResponseEntity<String>> internalGet(@PathVariable String key) { // <--- Return Mono<ResponseEntity<String>>
         log.debug("Received internal GET request for key: {}", key);
-        Object value = cacheService.get(key); // Delegates to LocalCache
-        if (value != null) {
-            return new ResponseEntity<>(value, HttpStatus.OK);
-        }
-        return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        return cacheService.get(key) // This now returns Mono<String>
+                .map(value -> {
+                    log.debug("InternalCacheController: Successfully mapped internal value for key: {}. Value: {}", key, value);
+                    return new ResponseEntity<>(value, HttpStatus.OK);
+                })
+                .defaultIfEmpty(new ResponseEntity<>(HttpStatus.NOT_FOUND)); // If Mono is empty, return 404
     }
 
     @PostMapping("/{key}")
-    public ResponseEntity<String> internalPut(@PathVariable String key,
-                                              @RequestBody InternalCachePutRequest request) {
+    public Mono<ResponseEntity<String>> internalPut(@PathVariable String key, // <--- Change return type to Mono<ResponseEntity<String>>
+                                                    @RequestBody InternalCachePutRequest request) {
         log.debug("Received internal PUT request for key: {}", key);
-        cacheService.put(key, request.getValue(), request.getTtlMillis()); // Delegates to LocalCache
-        return new ResponseEntity<>("Key '" + key + "' stored internally.", HttpStatus.OK); // Use OK instead of CREATED for internal
+        return cacheService.put(key, request.getValue(), request.getTtlMillis()) // Now returns Mono<Void>
+                .then(Mono.just(new ResponseEntity<>("Key '" + key + "' stored internally.", HttpStatus.OK)))
+                .onErrorResume(e -> {
+                    log.error("Internal PUT failed for key '{}': {}", key, e.getMessage());
+                    return Mono.just(new ResponseEntity<>("Internal PUT failed: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
+                });
     }
 
     @DeleteMapping("/{key}")
-    public ResponseEntity<String> internalDelete(@PathVariable String key) {
+    public Mono<ResponseEntity<String>> internalDelete(@PathVariable String key) { // <--- Change return type to Mono<ResponseEntity<String>>
         log.debug("Received internal DELETE request for key: {}", key);
-        cacheService.delete(key); // Delegates to LocalCache
-        return new ResponseEntity<>("Key '" + key + "' deleted internally.", HttpStatus.NO_CONTENT);
+        return cacheService.delete(key) // Now returns Mono<Void>
+                .then(Mono.just(new ResponseEntity<>("Key '" + key + "' deleted internally.", HttpStatus.NO_CONTENT)))
+                .onErrorResume(e -> {
+                    log.error("Internal DELETE failed for key '{}': {}", key, e.getMessage());
+                    return Mono.just(new ResponseEntity<>("Internal DELETE failed: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
+                });
     }
 
     @Data

@@ -3,10 +3,12 @@ package com.distributed.distributed_cache_project.core.consistenthashing;
 import com.distributed.distributed_cache_project.config.NodeConfigProperties;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
+import org.apache.commons.codec.digest.MurmurHash3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Component
@@ -66,9 +68,8 @@ public class HashRing {
         log.info("HashRing initialized with {} nodes.", ring.size());
     }
 
-    private int hashKey(String key){
-        int h = Objects.hashCode(key);
-        return h ^ (h >>> 16);
+    private int hash(String value){
+        return MurmurHash3.hash32(value.getBytes(StandardCharsets.UTF_8));
     }
 
     public void addRealNodeToRing(Node node){
@@ -78,7 +79,7 @@ public class HashRing {
         }
         for (int i = 0; i < VIRTUAL_NODES_PER_REAL_NODE; i++) {
             // Hash a combination of the node's address and the virtual node index
-            int virtualNodeHash = hashKey(node.getAddress() + "-" + i);
+            int virtualNodeHash = hash(node.getAddress() + "-" + i);
             ring.put(virtualNodeHash, node); // Store the REAL node object
             log.debug("Added virtual node for {} at hash {}", node.getId(), virtualNodeHash);
         }
@@ -107,7 +108,7 @@ public class HashRing {
             throw new IllegalStateException("Hash ring is empty. Cannot determine owner node.");
         }
 
-        int keyHash = hashKey(key);
+        int keyHash = hash(key);
         log.debug("Key '{}' hashed to {}", key, keyHash);
 
         // Find the node on the ring with a hash value greater than or equal to the key's hash.

@@ -2,6 +2,7 @@ package com.distributed.distributed_cache_project.network.client;
 
 import com.distributed.distributed_cache_project.api.InternalCacheController;
 import com.distributed.distributed_cache_project.core.consistenthashing.Node;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import org.springframework.web.reactive.function.client.WebClientRequestExceptio
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
 
 @Component
 public class NodeApiClient {
@@ -42,7 +44,6 @@ public class NodeApiClient {
      */
     public Mono<Void> forwardPut(Node targetNode, String key, Object value, long ttlMillis) {
         String url = String.format("http://%s:%d/internal/cache/%s", targetNode.getHost(), targetNode.getPort(), key);
-        log.info("Url here is -> '{}",url);
         log.info("Forwarding PUT request for key '{}' to node: {}", key, targetNode.getId());
 
         InternalCacheController.InternalCachePutRequest requestBody = new InternalCacheController.InternalCachePutRequest();
@@ -74,7 +75,7 @@ public class NodeApiClient {
      * @param key The key to retrieve.
      * @return A Mono<Object> containing the retrieved value, or Mono.empty() if not found.
      */
-    public Mono<Object> forwardGet(Node targetNode, String key) {
+    public Mono<String> forwardGet(Node targetNode, String key) {
         String url = String.format("http://%s:%d/internal/cache/%s", targetNode.getHost(), targetNode.getPort(), key);
         log.info("Forwarding GET request for key '{}' to node: {}", key, targetNode.getId());
 
@@ -87,7 +88,7 @@ public class NodeApiClient {
                     return clientResponse.bodyToMono(String.class)
                             .flatMap(errorBody -> Mono.error(new RuntimeException("Forwarded GET failed: " + errorBody)));
                 })
-                .bodyToMono(Object.class) // Expecting the value as an Object
+                .bodyToMono(String.class) // Expecting the value as an Object
                 .timeout(Duration.ofMillis(5000)) // Example timeout
                 .doOnError(WebClientRequestException.class, e ->
                         log.error("Network error forwarding GET for key '{}' to {}: {}", key, targetNode.getId(), e.getMessage()))

@@ -3,6 +3,8 @@ package com.distributed.distributed_cache_project.api;
 
 import com.distributed.distributed_cache_project.service.CacheService;
 import lombok.Data;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,6 +16,7 @@ import java.util.Map;
 @RequestMapping("/cache")
 public class CacheController {
     private final CacheService cacheService;
+    private static final Logger log = LoggerFactory.getLogger(CacheController.class);
 
     public CacheController(CacheService cacheService){
         this.cacheService = cacheService;
@@ -26,9 +29,12 @@ public class CacheController {
     }
 
     @GetMapping("/{key}")
-    public Mono<ResponseEntity<Object>> get(@PathVariable String key) {
+    public Mono<ResponseEntity<String>> get(@PathVariable String key) {
         return cacheService.get(key) // CacheService now returns Mono<Object>
-                .map(value -> new ResponseEntity<>(value, HttpStatus.OK)) // If value emitted, return OK
+                .map(value -> {
+                    log.info("CacheController: Successfully mapped value to ResponseEntity for key: {}. Value type: {}", key, value != null ? value.getClass().getName() : "null"); // <-- SET BREAKPOINT HERE
+                    return new ResponseEntity<>(value, HttpStatus.OK);
+                }) // If value emitted, return OK
                 .defaultIfEmpty(new ResponseEntity<>(HttpStatus.NOT_FOUND)); // If Mono is empty (404/not found), return NOT_FOUND
     }
 

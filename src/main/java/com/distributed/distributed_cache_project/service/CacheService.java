@@ -37,14 +37,14 @@ public class CacheService {
         log.info("CacheService initialized. Current node: {}", currentNode);
     }
 
-    public Mono<Object> get(String key) {
+    public Mono<String> get(String key) {
         Node ownerNode = hashRing.getOwnerNode(key);
 
         if (currentNode.equals(ownerNode)) {
             log.debug("Key '{}' belongs to this node. Retrieving locally.", key);
             // Convert immediate local result into a Mono
             Object value = localCache.get(key);
-            return Mono.justOrEmpty(value); // Emit value if present, empty if null
+            return Mono.justOrEmpty(value != null ? value.toString() : null);
         } else {
             log.debug("Key '{}' belongs to node {}. Forwarding GET request.", key, ownerNode.getId());
             return nodeApiClient.forwardGet(ownerNode, key);
