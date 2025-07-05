@@ -2,7 +2,7 @@ package com.distributed.distributed_cache_project.network.client;
 
 import com.distributed.distributed_cache_project.api.InternalCacheController;
 import com.distributed.distributed_cache_project.core.consistenthashing.Node;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.distributed.distributed_cache_project.network.model.HeartbeatRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -14,7 +14,6 @@ import org.springframework.web.reactive.function.client.WebClientRequestExceptio
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
 
 @Component
 public class NodeApiClient {
@@ -120,5 +119,28 @@ public class NodeApiClient {
                         log.error("Network error forwarding DELETE for key '{}' to {}: {}", key, targetNode.getId(), e.getMessage()))
                 .doOnError(Exception.class, e ->
                         log.error("An unexpected error occurred while forwarding DELETE for key '{}' to {}: {}", key, targetNode.getId(), e.getMessage()));
+    }
+
+    public Mono<Void> sendHeartbeat(Node targetNode, HeartbeatRequest heartbeat){
+        String url = String.format("http://%s:%d/internal/cache/heartbeat", targetNode.getHost(), targetNode.getPort());
+        log.debug("Sending heartbeat to {}: {}", targetNode.getId(), heartbeat);
+        return webClient.post()
+                .uri(url)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(heartbeat)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, clientResponse -> {
+                    // Log error but don't rethrow for heartbeats, as a failed heartbeat
+                    // will be handled by the timeout mechanism in NodeDiscoveryService.
+                    log.warn("Heartbeat to {} failed with status {}. Error: {}", targetNode.getId(), clientResponse.statusCode(), clientResponse.bodyToMono(String.class).block());
+                    return Mono.error(new RuntimeException("Heartbeat failed")); // Still return an error Mono to terminate chain
+                })
+                .bodyToMono(Void.class)
+                .timeout(Duration.ofMillis(3000)) // Shorter timeout for heartbeats
+                .doOnError(WebClientRequestException.class, e -> {
+                    // Log network errors, but don't propagate to stop the scheduler
+                    log.warn("Network error sending heartbeat to {}: {}", targetNode.getId(), e.getMessage());
+                })
+                .onErrorResume(e -> Mono.empty());
     }
 }

@@ -1,5 +1,7 @@
 package com.distributed.distributed_cache_project.api;
 
+import com.distributed.distributed_cache_project.network.discovery.NodeDiscoveryService;
+import com.distributed.distributed_cache_project.network.model.HeartbeatRequest;
 import com.distributed.distributed_cache_project.service.CacheService;
 import lombok.Data;
 import org.slf4j.Logger;
@@ -14,8 +16,10 @@ import reactor.core.publisher.Mono;
 public class InternalCacheController {
     private static final Logger log = LoggerFactory.getLogger(InternalCacheController.class);
     private final CacheService cacheService;
-    public InternalCacheController(CacheService cacheService){
+    private  final NodeDiscoveryService nodeDiscoveryService;
+    public InternalCacheController(CacheService cacheService,NodeDiscoveryService nodeDiscoveryService){
         this.cacheService = cacheService;
+        this.nodeDiscoveryService = nodeDiscoveryService;
     }
 
     @GetMapping("/{key}")
@@ -50,6 +54,12 @@ public class InternalCacheController {
                     log.error("Internal DELETE failed for key '{}': {}", key, e.getMessage());
                     return Mono.just(new ResponseEntity<>("Internal DELETE failed: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR));
                 });
+    }
+    @PostMapping("/heartbeat") // NEW ENDPOINT
+    public ResponseEntity<Void> internalHeartbeat(@RequestBody HeartbeatRequest request) {
+        log.info("Received heartbeat from node: {} at {}", request.getNodeId(), request.getTimestamp()); // Add this log
+        nodeDiscoveryService.onHeartbeatReceived(request);
+        return new ResponseEntity<>(HttpStatus.OK);
     }
 
     @Data

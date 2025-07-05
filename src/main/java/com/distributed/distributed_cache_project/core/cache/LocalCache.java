@@ -18,7 +18,7 @@ public class LocalCache {
     }
     public void put(String key, Object value, long ttlMillis) {
         try {
-            store.put(key, new CacheEntry(value, System.currentTimeMillis(), ttlMillis));
+            store.put(key, new CacheEntry(value, System.currentTimeMillis(), ttlMillis,System.currentTimeMillis()));
         } finally {
         }
     }
