@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 public class HashRing {
@@ -17,11 +18,15 @@ public class HashRing {
     private static final int VIRTUAL_NODES_PER_REAL_NODE = 100;
     private final TreeMap<Integer,Node> ring = new TreeMap<>();
     private final NodeConfigProperties nodeConfigProperties;
+
+    private final int replicationFactor;
     @Getter
     private Node currentNode;
 
+
     public HashRing(NodeConfigProperties nodeConfigProperties){
         this.nodeConfigProperties = nodeConfigProperties;
+        this.replicationFactor = nodeConfigProperties.getReplication().getFactor();
     }
 
     @PostConstruct
@@ -104,25 +109,12 @@ public class HashRing {
     }
 
     public Node getOwnerNode(String key) {
+        List<Node> nodes = getNodesForKey(key);
         if (ring.isEmpty()) {
             throw new IllegalStateException("Hash ring is empty. Cannot determine owner node.");
         }
 
-        int keyHash = hash(key);
-        log.debug("Key '{}' hashed to {}", key, keyHash);
-
-        // Find the node on the ring with a hash value greater than or equal to the key's hash.
-        // This is the core of consistent hashing: move clockwise.
-        Map.Entry<Integer, Node> entry = ring.ceilingEntry(keyHash);
-
-        if (entry == null) {
-            // If no such node exists, wrap around to the beginning of the ring (first node).
-            entry = ring.firstEntry();
-            log.debug("Wrapped around to first node: {}", entry.getValue().getId());
-        }
-
-        log.debug("Owner node for key '{}' is {}", key, entry.getValue().getId());
-        return entry.getValue();
+        return nodes.get(0);
     }
 
     public List<Node> getNodesInRing() {
@@ -131,6 +123,61 @@ public class HashRing {
 
     public int getRingSize() {
         return (int) ring.values().stream().distinct().count(); // Count distinct real nodes
+    }
+
+    /**
+     * Determines the primary and replica nodes for a given key.
+     * Nodes are ordered by their position on the ring.
+     *
+     * The cache key.
+     * A list of Node objects, with the first being the primary, followed by replicas.
+     * Returns an empty list if the ring is empty.
+     */
+    public List<Node> getNodesForKey(String key) {
+        if (ring.isEmpty()) {
+            log.warn("Attempted to get nodes for key '{}' from an empty HashRing.", key);
+            return Collections.emptyList();
+        }
+
+        List<Node> responsibleNodes = new ArrayList<>();
+        Set<Node> addedNodes = new HashSet<>(); // Use a set to avoid adding duplicate physical nodes if replication factor > actual unique nodes
+
+        int keyHash = hash(key);
+
+        // Find the starting point on the ring
+        Map.Entry<Integer, Node> entry = ring.ceilingEntry(keyHash);
+        if (entry == null) {
+            entry = ring.firstEntry(); // Wrap around if no node found clockwise
+        }
+
+        // Iterate clockwise to find primary and replicas
+        Map.Entry<Integer, Node> currentEntry = entry;
+        for (int i = 0; responsibleNodes.size() < replicationFactor && i < ring.size() * 2; i++) { // Loop max twice the ring size to find enough unique nodes
+            Node node = currentEntry.getValue();
+            if (addedNodes.add(node)) { // Add if it's a new unique physical node
+                responsibleNodes.add(node);
+            }
+
+            // Move to the next entry in the TreeMap (clockwise)
+            currentEntry = ring.higherEntry(currentEntry.getKey());
+            if (currentEntry == null) {
+                currentEntry = ring.firstEntry(); // Wrap around
+            }
+
+            if (currentEntry == null || (i > ring.size() && responsibleNodes.size() < replicationFactor)) {
+                // If the ring is too small or all unique nodes already added, break.
+                // Or if we've looped too many times without finding enough unique nodes (e.g., ring too small).
+                break;
+            }
+        }
+
+        if (responsibleNodes.size() < replicationFactor) {
+            log.warn("Could not find enough unique nodes ({}/{}) for key '{}' with replication factor {}. Current ring size: {} distinct nodes.",
+                    responsibleNodes.size(), replicationFactor, key, replicationFactor, getRingSize());
+        }
+
+        log.debug("Nodes for key '{}' (Primary + Replicas): {}", key, responsibleNodes.stream().map(Node::getId).collect(Collectors.toList()));
+        return responsibleNodes;
     }
 
 }

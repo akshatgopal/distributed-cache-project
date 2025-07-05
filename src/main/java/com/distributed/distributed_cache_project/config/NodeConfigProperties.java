@@ -16,12 +16,18 @@ public class NodeConfigProperties {
     // --- Peer Nodes ---
     // List of "host:port" strings for all known peer nodes
     private List<String> peers;
+    private ReplicationProperties replication;
 
     @Data
     public static class NodeProperties {
         private String id;
         private String host;
         private int port;
+    }
+
+    @Data
+    public static class ReplicationProperties {
+        private int factor; // The replication factor
     }
 
 }

@@ -9,8 +9,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class CacheService {
@@ -21,6 +24,8 @@ public class CacheService {
     private final HashRing hashRing;
     private final NodeApiClient nodeApiClient;
     private final Node currentNode;
+
+    private final int replicationFactor;
 
     public CacheService(LocalCache localCache,
                         HashRing hashRing,
@@ -34,7 +39,9 @@ public class CacheService {
             throw new IllegalStateException("Current node properties (cache.node) are not configured for CacheService.");
         }
         this.currentNode = new Node(currentProps.getHost() + ":" + currentProps.getPort(), currentProps.getHost(), currentProps.getPort());
-        log.info("CacheService initialized. Current node: {}", currentNode);
+        this.replicationFactor = nodeConfigProperties.getReplication().getFactor();
+
+        log.info("CacheService initialized. Current node: {}. Replication Factor: {}", currentNode, replicationFactor);
     }
 
     public Mono<String> get(String key) {
@@ -52,29 +59,75 @@ public class CacheService {
     }
 
     public Mono<Void> put(String key, Object value, long ttlMillis) {
-        Node ownerNode = hashRing.getOwnerNode(key);
-        log.debug(currentNode.getAddress(),currentNode.getId());
-        log.debug("It enters this area!!");
-        if (currentNode.equals(ownerNode)) {
-            log.debug("Key '{}' belongs to this node. Storing locally.", key);
-            localCache.put(key, value, ttlMillis);
-            return Mono.empty(); // Representing void completion
+        List<Node> responsibleNodes = hashRing.getNodesForKey(key);
+        if (responsibleNodes.isEmpty()) {
+            log.error("No nodes found in HashRing for key '{}'. Cannot store.", key);
+            return Mono.error(new IllegalStateException("No nodes available in cluster."));
+        }
+
+        Node primaryOwner = responsibleNodes.getFirst();
+
+        if (currentNode.equals(primaryOwner)) {
+            // This node is the primary owner
+            log.debug("Key '{}' belongs to this node. Storing locally as primary.", key);
+            localCache.put(key, value, ttlMillis); // Local store
+
+            // Replicate to other responsible nodes (if replication factor > 1)
+            if (replicationFactor > 1) {
+                // Get replicas, excluding the primary owner (this node)
+                List<Node> replicas = responsibleNodes.stream()
+                        .filter(node -> !node.equals(currentNode))
+                        .limit(replicationFactor - 1) // Only send to R-1 replicas
+                        .toList();
+
+                for (Node replica : replicas) {
+                    log.debug("Replicating PUT for key '{}' to replica node: {}", key, replica.getId());
+                    nodeApiClient.forwardPut(replica, key, value, ttlMillis)
+                            .subscribeOn(Schedulers.parallel()) // Perform replication asynchronously
+                            .doOnError(e -> log.warn("Failed to replicate PUT for key '{}' to {}: {}", key, replica.getId(), e.getMessage()))
+                            .subscribe(); // Subscribe to trigger the reactive flow (asynchronous)
+                }
+            }
+            return Mono.empty(); // Primary operation completes
         } else {
-            log.debug("Key '{}' belongs to node {}. Forwarding PUT request.", key, ownerNode.getId());
-            return nodeApiClient.forwardPut(ownerNode, key, value, ttlMillis);
+            // This node is not the primary owner, so forward to the primary
+            log.debug("Key '{}' belongs to primary node {}. Forwarding PUT request.", key, primaryOwner.getId());
+            return nodeApiClient.forwardPut(primaryOwner, key, value, ttlMillis);
         }
     }
 
     public Mono<Void> delete(String key) {
-        Node ownerNode = hashRing.getOwnerNode(key);
+        List<Node> responsibleNodes = hashRing.getNodesForKey(key);
+        if (responsibleNodes.isEmpty()) {
+            log.warn("No nodes found in HashRing for key '{}'. Cannot delete.", key);
+            return Mono.empty(); // Or Mono.error if you want to explicitly signal failure
+        }
 
-        if (currentNode.equals(ownerNode)) {
-            log.debug("Key '{}' belongs to this node. Deleting locally.", key);
+        Node primaryOwner = responsibleNodes.get(0);
+
+        if (currentNode.equals(primaryOwner)) {
+            log.debug("Key '{}' belongs to this node. Deleting locally as primary.", key);
             localCache.delete(key);
-            return Mono.empty(); // Representing void completion
+
+            // Propagate deletion to replicas (if replication factor > 1)
+            if (replicationFactor > 1) {
+                List<Node> replicas = responsibleNodes.stream()
+                        .filter(node -> !node.equals(currentNode))
+                        .limit(replicationFactor - 1)
+                        .toList();
+
+                for (Node replica : replicas) {
+                    log.debug("Propagating DELETE for key '{}' to replica node: {}", key, replica.getId());
+                    nodeApiClient.forwardDelete(replica, key)
+                            .subscribeOn(Schedulers.parallel()) // Perform asynchronously
+                            .doOnError(e -> log.warn("Failed to propagate DELETE for key '{}' to {}: {}", key, replica.getId(), e.getMessage()))
+                            .subscribe();
+                }
+            }
+            return Mono.empty();
         } else {
-            log.debug("Key '{}' belongs to node {}. Forwarding DELETE request.", key, ownerNode.getId());
-            return nodeApiClient.forwardDelete(ownerNode, key);
+            log.debug("Key '{}' belongs to primary node {}. Forwarding DELETE request.", key, primaryOwner.getId());
+            return nodeApiClient.forwardDelete(primaryOwner, key);
         }
     }
 

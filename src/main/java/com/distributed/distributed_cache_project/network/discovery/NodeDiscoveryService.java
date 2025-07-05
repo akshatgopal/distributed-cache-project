@@ -97,7 +97,7 @@ public class NodeDiscoveryService {
                 log.error("Error sending heartbeat to peer {}: {}", peerAddress, e.getMessage());
             }
         }
-        log.debug("Sent heartbeat from {}. Attempted to reach peers: {}", currentNode.getId(), peerLastSeen.keySet().stream().filter(addr -> !addr.equals(currentNode.getAddress())).toList()); // Update logging
+//        log.debug("Sent heartbeat from {}. Attempted to reach peers: {}", currentNode.getId(), peerLastSeen.keySet().stream().filter(addr -> !addr.equals(currentNode.getAddress())).toList()); // Update logging
     }
 
     /**
@@ -134,7 +134,7 @@ public class NodeDiscoveryService {
 
     public void onHeartbeatReceived(HeartbeatRequest request) {
         Node senderNode = new Node(request.getNodeId(), request.getNodeHost(), request.getNodePort());
-        log.debug("Received heartbeat from node: {}", senderNode.getId());
+//        log.debug("Received heartbeat from node: {}", senderNode.getId());
 
         // Always update last seen time
         peerLastSeen.put(senderNode.getAddress(), System.currentTimeMillis());

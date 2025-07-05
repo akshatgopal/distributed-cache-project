@@ -123,7 +123,7 @@ public class NodeApiClient {
 
     public Mono<Void> sendHeartbeat(Node targetNode, HeartbeatRequest heartbeat){
         String url = String.format("http://%s:%d/internal/cache/heartbeat", targetNode.getHost(), targetNode.getPort());
-        log.debug("Sending heartbeat to {}: {}", targetNode.getId(), heartbeat);
+//        log.debug("Sending heartbeat to {}: {}", targetNode.getId(), heartbeat);
         return webClient.post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
