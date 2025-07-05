@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration;
 public class CacheConfig {
 
     @Bean
-    public LocalCache localCache(){
-        return new LocalCache();
+    public LocalCache localCache(NodeConfigProperties nodeConfigProperties) { // <--- UPDATED METHOD SIGNATURE
+        return new LocalCache(nodeConfigProperties); // <--- PASSING CONFIG
     }
 }

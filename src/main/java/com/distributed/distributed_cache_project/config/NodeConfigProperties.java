@@ -17,6 +17,7 @@ public class NodeConfigProperties {
     // List of "host:port" strings for all known peer nodes
     private List<String> peers;
     private ReplicationProperties replication;
+    private CacheCapacityProperties capacity;
 
     @Data
     public static class NodeProperties {
@@ -28,6 +29,11 @@ public class NodeConfigProperties {
     @Data
     public static class ReplicationProperties {
         private int factor; // The replication factor
+    }
+
+    @Data
+    public static class CacheCapacityProperties {
+        private int maxEntries; // Maximum number of entries
     }
 
 }
