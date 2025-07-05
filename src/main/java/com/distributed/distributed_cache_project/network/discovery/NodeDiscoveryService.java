@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -145,5 +146,9 @@ public class NodeDiscoveryService {
             log.info("New or recovered node detected: {}. Adding to HashRing.", senderNode.getId());
             hashRing.addRealNodeToRing(senderNode);
         }
+    }
+
+    public Map<String , Long> getPeerLastSeen(){
+        return Collections.unmodifiableMap(peerLastSeen);
     }
 }

@@ -5,13 +5,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class LocalCache {
     private static final Logger log = LoggerFactory.getLogger(LocalCache.class);
@@ -20,6 +19,11 @@ public class LocalCache {
     private final int maxEntries;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    private final AtomicLong hitCount = new AtomicLong(0);
+    private final AtomicLong missCount = new AtomicLong(0);
+    private final AtomicLong putCount = new AtomicLong(0);
+    private final AtomicLong deleteCount = new AtomicLong(0);
 
     public LocalCache(NodeConfigProperties nodeConfigProperties) {
         int nodeMaxEntries = nodeConfigProperties.getCapacity().getMaxEntries();
@@ -46,31 +50,32 @@ public class LocalCache {
         scheduler.scheduleAtFixedRate(this::cleanupExpiredEntries, 1, 5, TimeUnit.MINUTES);
     }
     public void put(String key, Object value, long ttlMillis) {
-        try {
-            store.put(key, new CacheEntry(value, System.currentTimeMillis(), ttlMillis,System.currentTimeMillis()));
-        } finally {
-        }
+        store.put(key, new CacheEntry(value, System.currentTimeMillis(), ttlMillis, System.currentTimeMillis()));
+        putCount.incrementAndGet(); // Increment put count
+        log.debug("LocalCache: Stored key '{}'. Current size: {}. Put Count: {}", key, store.size(), putCount.get());
     }
     public Object get(String key) {
-        try {
-            CacheEntry entry = store.get(key);
-            if (entry == null) {
-                return null;
-            }
-            if (entry.isExpired()) {
-                store.remove(key);
-                return null;
-            }
-            return entry.getValue();
-        } finally {
+        CacheEntry entry = store.get(key);
+        if (entry == null) {
+            missCount.incrementAndGet(); // Increment miss count
+            log.debug("LocalCache: Key '{}' not found. Miss Count: {}", key, missCount.get());
+            return null;
         }
+        if (entry.isExpired()) {
+            store.remove(key);
+            missCount.incrementAndGet(); // Expired is also a miss
+            log.info("LocalCache: Key '{}' expired and removed. Miss Count: {}", key, missCount.get());
+            return null;
+        }
+        hitCount.incrementAndGet(); // Increment hit count
+        log.debug("LocalCache: Retrieved key '{}'. Current size: {}. Hit Count: {}", key, store.size(), hitCount.get());
+        return entry.getValue();
     }
 
     public void delete(String key) {
-        try {
-            store.remove(key);
-        } finally {
-        }
+        store.remove(key);
+        deleteCount.incrementAndGet(); // Increment delete count
+        log.debug("LocalCache: Deleted key '{}'. Current size: {}. Delete Count: {}", key, store.size(), deleteCount.get());
     }
 
     public int size(){
@@ -114,5 +119,38 @@ public class LocalCache {
     public void shutdown() {
         scheduler.shutdownNow();
         log.info("LocalCache scheduler shut down.");
+    }
+
+    public long getHitCount() {
+        return hitCount.get();
+    }
+
+    public long getMissCount() {
+        return missCount.get();
+    }
+
+    public long getPutCount() {
+        return putCount.get();
+    }
+
+    public long getDeleteCount() {
+        return deleteCount.get();
+    }
+
+    public double getHitRatio() {
+        long hits = hitCount.get();
+        long total = hits + missCount.get();
+        return total == 0 ? 0.0 : (double) hits / total;
+    }
+
+    // Get current JVM memory usage (approximate heap usage)
+    public long getUsedMemoryBytes() {
+        Runtime runtime = Runtime.getRuntime();
+        return runtime.totalMemory() - runtime.freeMemory();
+    }
+
+    public long getTotalMemoryBytes() {
+        Runtime runtime = Runtime.getRuntime();
+        return runtime.totalMemory();
     }
 }
