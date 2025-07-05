@@ -4,9 +4,7 @@ import com.distributed.distributed_cache_project.config.NodeConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -83,35 +81,51 @@ public class LocalCache {
     }
 
     public Map<String, Object> getAll() {
-        Map<String, Object> allEntries = new LinkedHashMap<>(); // Use LinkedHashMap to preserve order for getAll()
-        // Concurrent iteration over synchronizedMap is generally safe but might require external lock for consistency
-        // For simplicity and correctness here:
-        synchronized (store) { // Lock the map during iteration to ensure consistency
-            store.forEach((key, entry) -> {
-                if (entry != null && !entry.isExpired()) {
+        Map<String, Object> allEntries = new LinkedHashMap<>();
+        List<String> keysToProcess = new ArrayList<>();
+        synchronized (store) { // Synchronize during key collection
+            keysToProcess.addAll(store.keySet());
+        }
+        for (String key : keysToProcess) { // Iterate over the copy
+            CacheEntry entry;
+            // Get the entry while holding the lock (or rely on synchronizedMap's get)
+            // It's safer to re-fetch potentially expired entries
+            synchronized (store) { // Synchronize for get and remove if done within the loop
+                entry = store.get(key);
+            }
+
+            if (entry != null) { // Entry might be null if removed by another thread/cleanup
+                if (!entry.isExpired()) {
                     allEntries.put(key, entry.getValue());
-                } else if (entry != null) { // If expired during iteration
-                    store.remove(key); // Proactively remove
-                    log.debug("LocalCache: Proactively removed expired key '{}' during getAll.", key);
+                } else {
+                    synchronized (store) { // Synchronize for removal
+                        store.remove(key); // Proactively remove expired entry
+                        log.debug("LocalCache: Proactively removed expired key '{}' during getAll.", key);
+                    }
                 }
-            });
+            }
         }
         log.debug("LocalCache: Retrieved all {} entries.", allEntries.size());
-        return allEntries; // Return an unmodifiable map for safety
+        return allEntries;
     }
 
     private void cleanupExpiredEntries() {
         log.info("LocalCache: Running TTL cleanup. Initial size: {}", store.size());
-        // Use a safe iteration for ConcurrentHashMap (which LinkedHashMap does not directly support like this for concurrent removal)
-        // With synchronizedMap, external synchronization is safer.
-        synchronized (store) {
-            store.entrySet().removeIf(entry -> {
-                if (entry.getValue() != null && entry.getValue().isExpired()) {
-                    log.debug("LocalCache: Removed expired entry: {}", entry.getKey());
-                    return true; // Remove this entry
+        // CRITICAL FIX: Use a safe removal method.
+        // Option 1: Iterate over keys and remove (similar to getAll)
+        List<String> keysToRemove = new ArrayList<>();
+        synchronized (store) { // Synchronize during key collection
+            store.forEach((key, entry) -> {
+                if (entry != null && entry.isExpired()) {
+                    keysToRemove.add(key);
                 }
-                return false;
             });
+        }
+        for (String key : keysToRemove) {
+            synchronized (store) { // Synchronize for each removal
+                store.remove(key);
+                log.debug("LocalCache: Removed expired entry: {}", key);
+            }
         }
         log.info("LocalCache: TTL cleanup complete. Final size: {}", store.size());
     }
